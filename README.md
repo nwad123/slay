@@ -1,6 +1,6 @@
 # SLAY 🔥
 
-*Simulated Logic Analyzer for You*
+***S**imulated **L**ogic **A**nalyzer for **Y**ou*
 
 ## Installation
 
