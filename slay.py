@@ -3,30 +3,34 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from typing import List
 
 ghdl_bin = 'ghdl'
 gtkwave_bin = 'gtkwave'
 
-def ghdl_installed() -> bool:
-    if not shutil.which(ghdl_bin):
-        click.echo("GHDL bin not found")
+def is_installed(binary: str) -> bool:
+    """Checks if a given binary is installed or not"""
+    if not shutil.which(binary):
+        click.echo(f"No candidate for {binary} found")
         return False
     else:
-        click.echo("Suitible GHDL candidate found")
         return True
 
-def gtkwave_installed() -> bool:
-    if not shutil.which(gtkwave_bin):
-        click.echo("gtkwave bin not found")
-        return False
-    else:
-        click.echo("Suitible gtkwave candidate found")
-        return True
+def get_src_files(*, path: Path = os.getcwd()) -> List[str]:
+    """Returns a list of all the .vhd or .vhdl files in a directory"""
+    vhdl_files: List[Path] = []
+
+    # find all the VHDL files and append them along with their path to the list
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            if file.endswith(".vhd") or file.endswith(".vhdl"):
+                vhdl_files.append(Path(os.path.join(root, file)))
+
+    return vhdl_files
 
 @click.group()
 def cli():
-    """Wrapper for GHDL and GTKwave to produce easy simulations and
-syntax checking."""
+    """Wrapper for GHDL and GTKwave to produce easy simulations and syntax checking."""
 
 @click.command()
 @click.option("--file", "-f", "file_",
@@ -38,44 +42,50 @@ def check(file_):
     if file_:
         files.append(file_)
     else:
-        for file in os.listdir('.'):
-            if file.endswith('.vhd') or file.endswith('.vhdl'):
-                files.append(file)
+        files = get_src_files()
 
+    click.echo(f"Analyzing file(s)...")
     for file in files:
-        click.echo(f"Analyzing {file}")
-        subprocess.run([ghdl_bin, '-a', file])
+        subprocess.run([ghdl_bin, '-s', "--work=work", file])
 
 @click.command()
 @click.argument("testbench",
-              type=click.Path(exists=True, path_type=Path))
-@click.option("--no-wave", "-nw", "nw",
+                nargs=-1,
+                type=click.Path(exists=True, path_type=Path))
+@click.option("--no-wave", "-n", "no_wave",
               help="Indicates that waveforms should not be produced",
               is_flag=True)
-def simulate(testbench, nw):
+def simulate(testbench, no_wave):
     """Simulates the desired testbench."""
-    flag = ""
-    if not nw:
-        # check if the waveform folder exists
-        if not os.path.exists("./waveforms"):
-            os.makedirs("./waveforms")
+    # get a list of the testbenches to run
+    testbenches: List[Path] = []
+    for tb in testbench:
+        testbenches.append(tb)
 
-        # get the filename
-        tb_name = Path("./waveforms", testbench.stem + ".vcd")
+    # perform analysis on all of the files
+    testbenches_str: List[str] = []
+    for tb in testbenches:
+        testbenches_str.append(str(tb))
 
-        # add the ghdl flag
-        flag = f"--vcd={tb_name}"
+    sp_opts = [ghdl_bin, '-a', "--work=work"] + testbenches_str
+    subprocess.run(sp_opts)
 
-    if ghdl_installed:
-        click.echo("Runnning ghdl -e")
-        subprocess.run([ghdl_bin, '-e', tb_name.stem])
-        click.echo("Runnning ghdl -r")
-        subprocess.run([ghdl_bin, '-r', tb_name.stem, flag, "--stop-time=1000us"])
+    # perform elaboration and simulation on each of the desired top level units
+    for tb in testbenches:
+        # elaboration
+        sp_opts = [ghdl_bin, '-e', '--work=work', tb.stem]
+        subprocess.run(sp_opts)
 
-    if not nw and gtkwave_installed:
-        click.echo("opening gtkwave")
-        subprocess.run([gtkwave_bin, tb_name])
+        # simulation
+        if no_wave:
+            sp_opts = [ghdl_bin, '-r', '--work=work', tb.stem, "--stop-time=100us"]
+        else:
+            sp_opts = [ghdl_bin, '-r', '--work=work', tb.stem, f'--vcd=./waveforms/{tb.stem}.vcd', "--stop-time=100us"]
+        subprocess.run(sp_opts)
 
+        # waveform viewer
+        if not no_wave:
+            click.echo("GTKWave Not implemented yet")
 
 cli.add_command(check)
 cli.add_command(simulate)
